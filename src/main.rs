@@ -1,9 +1,9 @@
-use std::cell::RefCell;
+use gtk::glib;
+use gtk::prelude::*;
+use gtk::{Application, ApplicationWindow, Label, Orientation, Switch};
 use pipewire as pw;
 use pw::{node::Node, proxy::Listener, types::ObjectType};
-use gtk::prelude::*;
-use gtk::{Application, ApplicationWindow, Switch, Label, Orientation};
-use gtk::glib;
+use std::cell::RefCell;
 use std::process::Command;
 
 enum Action {
@@ -33,7 +33,8 @@ fn spawn_pipewire_listener(tx: async_channel::Sender<()>) {
                     return;
                 }
 
-                let is_source = obj.props.and_then(|d| d.get("media.class")) == Some("Audio/Source");
+                let is_source =
+                    obj.props.and_then(|d| d.get("media.class")) == Some("Audio/Source");
 
                 if !is_source {
                     return;
