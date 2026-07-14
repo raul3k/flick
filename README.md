@@ -1,5 +1,6 @@
 # Flick
 
+[![CI](https://github.com/raul3k/flick/actions/workflows/ci.yml/badge.svg)](https://github.com/raul3k/flick/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Mute and unmute your microphone on Linux, from a scriptable CLI or a small GTK window whose status stays in sync with the real state in real time.
