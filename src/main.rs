@@ -1,6 +1,8 @@
+use gtk::cairo;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Label, Orientation, Switch};
+use ksni::blocking::TrayMethods;
 use pipewire as pw;
 use pw::{node::Node, proxy::Listener, types::ObjectType};
 use std::cell::RefCell;
@@ -83,6 +85,155 @@ fn is_muted() -> bool {
 
     let text = String::from_utf8_lossy(&output.stdout);
     text.contains("[MUTED]")
+}
+
+/// Draws the tray icon: a colored dot ("farol"), green when active and red
+/// when muted. Deliberately NOT a microphone glyph, because GNOME already
+/// shows one to signal that an app is recording. Returns it as an ARGB32
+/// pixmap in network byte order, the format `ksni::Icon` expects.
+fn make_icon(active: bool) -> ksni::Icon {
+    // A square icon holding one big dot, so the panel renders it at bar size
+    // like any other tray icon (battery, volume) instead of shrinking a wide
+    // bitmap. Drawn in a 24x24 logical box at SCALE for a crisp downscale.
+    use std::f64::consts::PI;
+    const SCALE: i32 = 4;
+    let width = 24 * SCALE;
+    let height = 24 * SCALE;
+
+    let mut surface =
+        cairo::ImageSurface::create(cairo::Format::ARgb32, width, height).expect("cairo surface");
+    {
+        let ctx = cairo::Context::new(&surface).expect("cairo context");
+        ctx.scale(SCALE as f64, SCALE as f64); // draw in logical 24x24 coords
+
+        let (r, g, b) = if active {
+            (0.18, 0.80, 0.44) // green
+        } else {
+            (0.91, 0.30, 0.24) // red
+        };
+        ctx.set_source_rgb(r, g, b);
+        ctx.arc(12.0, 12.0, 9.5, 0.0, 2.0 * PI);
+        ctx.fill().expect("fill dot");
+    }
+    surface.flush();
+
+    let stride = surface.stride() as usize;
+    let data = surface.data().expect("surface data");
+
+    // cairo stores premultiplied native-endian ARGB32; ksni wants straight
+    // (non-premultiplied) ARGB32 in network byte order (bytes A, R, G, B).
+    let mut out = vec![0u8; (width * height * 4) as usize];
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let i = y * stride + x * 4;
+            let px = u32::from_ne_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+            let a = (px >> 24) & 0xff;
+            let (mut r, mut g, mut b) = ((px >> 16) & 0xff, (px >> 8) & 0xff, px & 0xff);
+            if a > 0 {
+                r = (r * 255 / a).min(255);
+                g = (g * 255 / a).min(255);
+                b = (b * 255 / a).min(255);
+            }
+            let o = (y * width as usize + x) * 4;
+            out[o] = a as u8;
+            out[o + 1] = r as u8;
+            out[o + 2] = g as u8;
+            out[o + 3] = b as u8;
+        }
+    }
+
+    ksni::Icon {
+        width,
+        height,
+        data: out,
+    }
+}
+
+/// Opens (or focuses) the Flick window by relaunching the binary with no args.
+fn open_window() {
+    if let Ok(exe) = std::env::current_exe() {
+        Command::new(exe).spawn().ok();
+    }
+}
+
+struct MicTray {
+    muted: bool,
+    icon_on: ksni::Icon,
+    icon_off: ksni::Icon,
+}
+
+impl ksni::Tray for MicTray {
+    fn id(&self) -> String {
+        "io.github.raul3k.flick".into()
+    }
+
+    fn title(&self) -> String {
+        "Mic".into()
+    }
+
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        let icon = if self.muted {
+            &self.icon_off
+        } else {
+            &self.icon_on
+        };
+        vec![icon.clone()]
+    }
+
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip {
+            title: "Mic".into(),
+            description: if self.muted {
+                "Microfone: mutado".into()
+            } else {
+                "Microfone: ligado".into()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn activate(&mut self, _x: i32, _y: i32) {
+        open_window();
+    }
+
+    fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
+        use ksni::menu::StandardItem;
+        vec![
+            StandardItem {
+                label: "Abrir Flick".into(),
+                activate: Box::new(|_| open_window()),
+                ..Default::default()
+            }
+            .into(),
+            ksni::MenuItem::Separator,
+            StandardItem {
+                label: "Sair".into(),
+                activate: Box::new(|_| std::process::exit(0)),
+                ..Default::default()
+            }
+            .into(),
+        ]
+    }
+}
+
+fn run_tray() {
+    let tray = MicTray {
+        muted: is_muted(),
+        icon_on: make_icon(true),
+        icon_off: make_icon(false),
+    };
+    let handle = tray.spawn().expect("could not register tray icon");
+
+    // pipewire -> keep the tray in sync with the real mic state
+    let (tx, rx) = async_channel::unbounded::<()>();
+    spawn_pipewire_listener(tx);
+
+    while rx.recv_blocking().is_ok() {
+        let muted = is_muted();
+        if handle.update(|t: &mut MicTray| t.muted = muted).is_none() {
+            break; // tray service was shut down
+        }
+    }
 }
 
 fn run_gui() {
@@ -195,9 +346,9 @@ fn run_cli(arg: &str) {
 }
 
 fn main() {
-    if let Some(arg) = std::env::args().nth(1) {
-        run_cli(&arg);
-    } else {
-        run_gui();
+    match std::env::args().nth(1).as_deref() {
+        Some("tray") => run_tray(),
+        Some(arg) => run_cli(arg),
+        None => run_gui(),
     }
 }

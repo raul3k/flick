@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 async-channel = "2.5.0"
 gtk = { version = "0.11.4", package = "gtk4" }
+ksni = { version = "0.3.6", features = ["blocking"] }
 pipewire = "0.10.0"
 
 [package.metadata.deb]
@@ -18,4 +19,5 @@ priority = "optional"
 assets = [
     ["target/release/flick", "usr/bin/", "755"],
     ["io.github.raul3k.flick.desktop", "usr/share/applications/", "644"],
+    ["flick-tray.desktop", "etc/xdg/autostart/", "644"],
 ]
