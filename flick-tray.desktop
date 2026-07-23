@@ -1,7 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=Flick (bandeja)
-Comment=Indicador de microfone na bandeja do sistema
+Name=Flick (tray)
+Name[pt_BR]=Flick (bandeja)
+Name[es]=Flick (bandeja)
+Comment=Microphone indicator in the system tray
+Comment[pt_BR]=Indicador de microfone na bandeja do sistema
+Comment[es]=Indicador de micrófono en la bandeja del sistema
 Exec=/usr/bin/flick tray
 Icon=audio-input-microphone
 Terminal=false

@@ -1,0 +1,38 @@
+_version: 2
+
+# English is the canonical text; the other locales are translations of it.
+
+status.live:
+  en: "Microphone: on"
+  es: "Micrófono: activado"
+  pt-BR: "Microfone: ligado"
+
+status.muted:
+  en: "Microphone: muted"
+  es: "Micrófono: silenciado"
+  pt-BR: "Microfone: mutado"
+
+tray.open:
+  en: Open Flick
+  es: Abrir Flick
+  pt-BR: Abrir Flick
+
+tray.preferences:
+  en: Preferences
+  es: Preferencias
+  pt-BR: Preferências
+
+tray.language:
+  en: Language
+  es: Idioma
+  pt-BR: Idioma
+
+tray.language_auto:
+  en: Same as the system
+  es: Igual que el sistema
+  pt-BR: Igual ao sistema
+
+tray.quit:
+  en: Quit
+  es: Salir
+  pt-BR: Sair

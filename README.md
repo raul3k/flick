@@ -14,6 +14,7 @@ Mute and unmute your microphone on Linux, from a scriptable CLI, a tray indicato
 - A **tray indicator** next to the clock: an "F" tile, green when the mic is live, red and cut by a diagonal when it is muted. The cut means the state is readable without relying on color, which matters because green and red are the pair most affected by color blindness.
 - The window never lies: it reads the real mic state and **updates live** whenever the mic changes from anywhere (GNOME, another app, a keyboard shortcut), using PipeWire events rather than polling.
 - One binary, three modes: a scriptable CLI, the tray indicator, and the GUI.
+- Speaks **English, Spanish and Portuguese (Brazil)**, following your system language, with a picker in the tray if you want a different one.
 - Small and native (GTK4, talks to PipeWire/WirePlumber).
 
 ## Requirements
@@ -66,6 +67,20 @@ flick status   # print the current state
 flick on       # unmute
 flick off      # mute
 flick toggle   # flip the current state
+```
+
+### Language
+
+Flick follows your system language, falling back to English when that language is not translated yet. To pick another one, use **Preferences -> Language** in the tray menu. The choice applies immediately and is remembered.
+
+Translations live in [`locales/app.yml`](locales/app.yml), one entry per string with every language side by side, and are compiled into the binary. Adding a language means adding its code to `LANGUAGES` in `src/i18n.rs` and filling that file in. Pull requests with new languages are welcome.
+
+### Settings file
+
+Preferences are stored at `~/.config/flick/config.toml` (`$XDG_CONFIG_HOME` is respected). The file is only written once you change something, and an unreadable one is ignored rather than fatal.
+
+```toml
+language = "auto" # or "en", "es", "pt-BR"
 ```
 
 ### Bind it to a key (optional)

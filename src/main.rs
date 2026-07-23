@@ -1,3 +1,7 @@
+mod config;
+mod i18n;
+
+use config::Config;
 use gtk::cairo;
 use gtk::glib;
 use gtk::prelude::*;
@@ -5,9 +9,19 @@ use gtk::{Application, ApplicationWindow, Label, Orientation, Switch};
 use ksni::blocking::TrayMethods;
 use pipewire as pw;
 use pw::{node::Node, proxy::Listener, types::ObjectType};
+use rust_i18n::t;
 use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
+
+rust_i18n::i18n!("locales", fallback = "en");
+
+/// What the tray thread can ask the GTK main loop to do. Tray callbacks run on
+/// the D-Bus thread and must never touch widgets themselves.
+enum UiMsg {
+    Show,
+    Refresh,
+}
 
 enum Action {
     On,
@@ -62,12 +76,12 @@ fn spawn_pipewire_listener(tx: async_channel::Sender<()>) {
 
 fn refresh(muted: bool, indicator: &gtk::Box, label: &Label) {
     let (text, color) = if muted {
-        ("Microfone: mutado", "off")
+        (t!("status.muted"), "off")
     } else {
-        ("Microfone: ligado", "on")
+        (t!("status.live"), "on")
     };
 
-    label.set_text(text);
+    label.set_text(&text);
     indicator.set_css_classes(&["indicator", color]);
 }
 
@@ -191,9 +205,23 @@ struct MicTray {
     muted: bool,
     icon_on: ksni::Icon,
     icon_off: ksni::Icon,
-    /// Asks the GTK main loop to present the window. Tray callbacks run on the
-    /// D-Bus thread, so they must never touch widgets themselves.
-    show_window: async_channel::Sender<()>,
+    /// Current language setting: `auto`, or a code from [`i18n::LANGUAGES`].
+    language: String,
+    ui: async_channel::Sender<UiMsg>,
+}
+
+impl MicTray {
+    fn set_language(&mut self, index: usize) {
+        self.language = i18n::setting_at(index);
+        i18n::apply(&self.language);
+        Config {
+            language: self.language.clone(),
+        }
+        .save();
+        // the tray relabels itself once this callback returns, but the window
+        // is on the other thread and has to be told
+        self.ui.try_send(UiMsg::Refresh).ok();
+    }
 }
 
 impl ksni::Tray for MicTray {
@@ -218,32 +246,64 @@ impl ksni::Tray for MicTray {
         ksni::ToolTip {
             title: "Mic".into(),
             description: if self.muted {
-                "Microfone: mutado".into()
+                t!("status.muted").into_owned()
             } else {
-                "Microfone: ligado".into()
+                t!("status.live").into_owned()
             },
             ..Default::default()
         }
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
-        self.show_window.try_send(()).ok();
+        self.ui.try_send(UiMsg::Show).ok();
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::StandardItem;
+        use ksni::menu::{RadioGroup, RadioItem, StandardItem, SubMenu};
+
+        let mut languages = vec![RadioItem {
+            label: t!("tray.language_auto").into_owned(),
+            ..Default::default()
+        }];
+        languages.extend(i18n::LANGUAGES.iter().map(|(_, name)| RadioItem {
+            label: (*name).to_string(),
+            ..Default::default()
+        }));
+
         vec![
             StandardItem {
-                label: "Abrir Flick".into(),
-                activate: Box::new(|t: &mut MicTray| {
-                    t.show_window.try_send(()).ok();
+                label: t!("tray.open").into_owned(),
+                activate: Box::new(|tray: &mut MicTray| {
+                    tray.ui.try_send(UiMsg::Show).ok();
                 }),
+                ..Default::default()
+            }
+            .into(),
+            SubMenu {
+                label: t!("tray.preferences").into_owned(),
+                submenu: vec![
+                    SubMenu {
+                        label: t!("tray.language").into_owned(),
+                        submenu: vec![
+                            RadioGroup {
+                                selected: i18n::menu_index(&self.language),
+                                select: Box::new(|tray: &mut MicTray, index| {
+                                    tray.set_language(index)
+                                }),
+                                options: languages,
+                            }
+                            .into(),
+                        ],
+                        ..Default::default()
+                    }
+                    .into(),
+                ],
                 ..Default::default()
             }
             .into(),
             ksni::MenuItem::Separator,
             StandardItem {
-                label: "Sair".into(),
+                label: t!("tray.quit").into_owned(),
                 activate: Box::new(|_| std::process::exit(0)),
                 ..Default::default()
             }
@@ -255,7 +315,7 @@ impl ksni::Tray for MicTray {
 /// Runs the tray indicator together with the window. `show_window` decides
 /// whether the window starts visible (`flick`) or stays hidden until asked for
 /// from the tray (`flick tray`, which is what autostart runs).
-fn run_app(show_window: bool) {
+fn run_app(show_window: bool, config: Config) {
     let app = Application::builder()
         .application_id("io.github.raul3k.flick")
         .build();
@@ -310,12 +370,13 @@ fn run_app(show_window: bool) {
         });
 
         // tray indicator, in this same process
-        let (show_tx, show_rx) = async_channel::unbounded::<()>();
+        let (ui_tx, ui_rx) = async_channel::unbounded::<UiMsg>();
         let tray = MicTray {
             muted,
             icon_on: make_icon(true),
             icon_off: make_icon(false),
-            show_window: show_tx,
+            language: config.language.clone(),
+            ui: ui_tx,
         };
         let tray_handle = tray.spawn().expect("could not register tray icon");
 
@@ -363,9 +424,16 @@ fn run_app(show_window: bool) {
         });
 
         let window_evt = window.clone();
+        let indicator_ui = indicator.clone();
+        let label_ui = label.clone();
         glib::spawn_future_local(async move {
-            while show_rx.recv().await.is_ok() {
-                window_evt.present();
+            while let Ok(msg) = ui_rx.recv().await {
+                match msg {
+                    UiMsg::Show => window_evt.present(),
+                    // the language changed, so the visible text has to be
+                    // rebuilt from the new locale
+                    UiMsg::Refresh => refresh(is_muted(), &indicator_ui, &label_ui),
+                }
             }
         });
 
@@ -395,18 +463,21 @@ fn run_cli(arg: &str) {
         Action::Toggle => set_mute("toggle"),
         Action::Status => {
             if is_muted() {
-                println!("Microfone: mutado");
+                println!("{}", t!("status.muted"));
             } else {
-                println!("Microfone: ligado");
+                println!("{}", t!("status.live"));
             }
         }
     }
 }
 
 fn main() {
+    let config = Config::load();
+    i18n::apply(&config.language);
+
     match std::env::args().nth(1).as_deref() {
-        Some("tray") => run_app(false),
+        Some("tray") => run_app(false, config),
         Some(arg) => run_cli(arg),
-        None => run_app(true),
+        None => run_app(true, config),
     }
 }

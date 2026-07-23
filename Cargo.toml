@@ -2,14 +2,19 @@
 name = "flick"
 version = "0.1.0"
 edition = "2024"
-description = "Controle de microfone para o desktop (mute/unmute com atalho e janela ao vivo)"
+description = "Desktop microphone control: mute and unmute from a CLI, a tray indicator, or a live window"
 license = "MIT"
 
 [dependencies]
 async-channel = "2.5.0"
+dirs = "6.0.0"
 gtk = { version = "0.11.4", package = "gtk4" }
 ksni = { version = "0.3.6", features = ["blocking"] }
 pipewire = "0.10.0"
+rust-i18n = "4.2.1"
+serde = { version = "1.0.229", features = ["derive"] }
+sys-locale = "0.3.2"
+toml = "1.1.3"
 
 [package.metadata.deb]
 maintainer = "Raul Souza <raul.3k@gmail.com>"
