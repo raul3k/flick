@@ -11,7 +11,7 @@ Mute and unmute your microphone on Linux, from a scriptable CLI, a tray indicato
 
 - Mute, unmute, or toggle your default microphone.
 - A compact GTK4 window: a green/red indicator, a status label, and a switch.
-- A **tray indicator** next to the clock: a green dot when the mic is live, red when it is muted. It stays out of the way and tells you the state at a glance.
+- A **tray indicator** next to the clock: an "F" tile, green when the mic is live, red and cut by a diagonal when it is muted. The cut means the state is readable without relying on color, which matters because green and red are the pair most affected by color blindness.
 - The window never lies: it reads the real mic state and **updates live** whenever the mic changes from anywhere (GNOME, another app, a keyboard shortcut), using PipeWire events rather than polling.
 - One binary, three modes: a scriptable CLI, the tray indicator, and the GUI.
 - Small and native (GTK4, talks to PipeWire/WirePlumber).
@@ -45,7 +45,9 @@ cargo build --release
 
 ### Window
 
-Launch **Flick** from your applications menu, or run `flick` with no arguments.
+Launch **Flick** from your applications menu, or run `flick` with no arguments. This opens the window **and** puts the indicator in the tray.
+
+Closing the window only hides it, so the indicator stays. Use **Sair** in the tray menu to quit for good. Running `flick` again reaches the instance already running instead of starting a second one.
 
 ### Tray indicator
 
@@ -53,9 +55,9 @@ Launch **Flick** from your applications menu, or run `flick` with no arguments.
 flick tray
 ```
 
-Runs in the background and puts a dot next to the clock: **green** when the mic is live, **red** when it is muted, following the real state in real time. Click it to open the window; right-click for a menu with **Abrir Flick** and **Sair**.
+Same thing without opening the window: it goes straight to the tray and waits there. This is what the autostart entry shipped in the `.deb` runs, so after installing, the indicator is back on every login with no extra setup.
 
-The `.deb` installs an autostart entry, so after installing it the indicator comes back on every login with no extra setup.
+The indicator follows the real state in real time. Click it to open the window; right-click for a menu with **Abrir Flick** and **Sair**.
 
 ### Command line
 
@@ -74,7 +76,7 @@ Flick does not register a global shortcut itself, but since `flick toggle` is ju
 
 - The mic state is read from `wpctl` (the mute of `@DEFAULT_AUDIO_SOURCE@`).
 - A background thread connects to PipeWire and listens for changes on audio source nodes. When the mic changes from anywhere, the window re-reads the real state and refreshes. UI updates are marshalled back to the main thread through an async channel, so the PipeWire thread never touches widgets.
-- The tray indicator speaks `StatusNotifierItem` over D-Bus (no GTK status icon), and its dot is drawn with cairo and handed over as an ARGB32 pixmap, so it scales to whatever size the panel asks for. It listens to the same PipeWire events as the window.
+- The tray indicator speaks `StatusNotifierItem` over D-Bus (no GTK status icon). Its tile is drawn with cairo and handed over as an ARGB32 pixmap, so the panel can scale it to whatever size it wants. Window and indicator live in the same process and share one PipeWire listener; the tray runs on its own D-Bus thread and asks the main loop to show the window through a channel, so it never touches widgets directly.
 
 ## Building a `.deb`
 

@@ -7,6 +7,7 @@ use pipewire as pw;
 use pw::{node::Node, proxy::Listener, types::ObjectType};
 use std::cell::RefCell;
 use std::process::Command;
+use std::rc::Rc;
 
 enum Action {
     On,
@@ -112,8 +113,47 @@ fn make_icon(active: bool) -> ksni::Icon {
             (0.91, 0.30, 0.24) // red
         };
         ctx.set_source_rgb(r, g, b);
-        ctx.arc(12.0, 12.0, 9.5, 0.0, 2.0 * PI);
-        ctx.fill().expect("fill dot");
+
+        // rounded square, the brand tile, filling the whole canvas so the
+        // panel has nothing to shrink away
+        let (x, y, w, h, radius) = (0.5, 0.5, 23.0, 23.0, 5.5);
+        ctx.new_sub_path();
+        ctx.arc(x + w - radius, y + radius, radius, -0.5 * PI, 0.0);
+        ctx.arc(x + w - radius, y + h - radius, radius, 0.0, 0.5 * PI);
+        ctx.arc(x + radius, y + h - radius, radius, 0.5 * PI, PI);
+        ctx.arc(x + radius, y + radius, radius, PI, 1.5 * PI);
+        ctx.close_path();
+        ctx.fill().expect("fill tile");
+
+        // punch the "F" out of the tile so the panel shows through it, which
+        // keeps the letter readable on both light and dark bars
+        ctx.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+        ctx.set_font_size(22.0);
+        let ext = ctx.text_extents("F").expect("text extents");
+        ctx.move_to(
+            x + (w - ext.width()) / 2.0 - ext.x_bearing(),
+            y + (h - ext.height()) / 2.0 - ext.y_bearing(),
+        );
+        // fill plus stroke: cairo's toy font API tops out at Bold, so the
+        // glyph is outlined as well to get a heavier weight than the font ships
+        ctx.text_path("F");
+        ctx.set_line_width(1.4);
+        ctx.set_line_join(cairo::LineJoin::Round);
+        ctx.set_operator(cairo::Operator::Clear);
+        ctx.fill_preserve().expect("punch letter");
+        ctx.stroke().expect("thicken letter");
+
+        // Muted also gets a diagonal cut, so the state survives without color.
+        // Green and red collapse under the common red-green deficiencies
+        // (measured: only 40% apart in protanopia, and 1.8:1 in luminance),
+        // so color alone would leave those users unable to read the state.
+        if !active {
+            ctx.set_line_width(3.0);
+            ctx.move_to(4.0, 20.0);
+            ctx.line_to(20.0, 4.0);
+            ctx.stroke().expect("cut slash");
+        }
+        ctx.set_operator(cairo::Operator::Over);
     }
     surface.flush();
 
@@ -149,17 +189,13 @@ fn make_icon(active: bool) -> ksni::Icon {
     }
 }
 
-/// Opens (or focuses) the Flick window by relaunching the binary with no args.
-fn open_window() {
-    if let Ok(exe) = std::env::current_exe() {
-        Command::new(exe).spawn().ok();
-    }
-}
-
 struct MicTray {
     muted: bool,
     icon_on: ksni::Icon,
     icon_off: ksni::Icon,
+    /// Asks the GTK main loop to present the window. Tray callbacks run on the
+    /// D-Bus thread, so they must never touch widgets themselves.
+    show_window: async_channel::Sender<()>,
 }
 
 impl ksni::Tray for MicTray {
@@ -193,7 +229,7 @@ impl ksni::Tray for MicTray {
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
-        open_window();
+        self.show_window.try_send(()).ok();
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
@@ -201,7 +237,9 @@ impl ksni::Tray for MicTray {
         vec![
             StandardItem {
                 label: "Abrir Flick".into(),
-                activate: Box::new(|_| open_window()),
+                activate: Box::new(|t: &mut MicTray| {
+                    t.show_window.try_send(()).ok();
+                }),
                 ..Default::default()
             }
             .into(),
@@ -216,32 +254,24 @@ impl ksni::Tray for MicTray {
     }
 }
 
-fn run_tray() {
-    let tray = MicTray {
-        muted: is_muted(),
-        icon_on: make_icon(true),
-        icon_off: make_icon(false),
-    };
-    let handle = tray.spawn().expect("could not register tray icon");
-
-    // pipewire -> keep the tray in sync with the real mic state
-    let (tx, rx) = async_channel::unbounded::<()>();
-    spawn_pipewire_listener(tx);
-
-    while rx.recv_blocking().is_ok() {
-        let muted = is_muted();
-        if handle.update(|t: &mut MicTray| t.muted = muted).is_none() {
-            break; // tray service was shut down
-        }
-    }
-}
-
-fn run_gui() {
+/// Runs the tray indicator together with the window. `show_window` decides
+/// whether the window starts visible (`flick`) or stays hidden until asked for
+/// from the tray (`flick tray`, which is what autostart runs).
+fn run_app(show_window: bool) {
     let app = Application::builder()
         .application_id("io.github.raul3k.flick")
         .build();
 
-    app.connect_activate(|app| {
+    // Built on the first activation only. Later activations just present it,
+    // so running `flick` again reaches the instance already in the tray
+    // instead of stacking a second window and a second icon.
+    let existing: Rc<RefCell<Option<ApplicationWindow>>> = Rc::new(RefCell::new(None));
+
+    app.connect_activate(move |app| {
+        if let Some(window) = existing.borrow().as_ref() {
+            window.present();
+            return;
+        }
         let css = gtk::CssProvider::new();
         css.load_from_data(
             r#"
@@ -281,7 +311,17 @@ fn run_gui() {
             glib::Propagation::Proceed
         });
 
-        // pipewire -> channel -> UI
+        // tray indicator, in this same process
+        let (show_tx, show_rx) = async_channel::unbounded::<()>();
+        let tray = MicTray {
+            muted,
+            icon_on: make_icon(true),
+            icon_off: make_icon(false),
+            show_window: show_tx,
+        };
+        let tray_handle = tray.spawn().expect("could not register tray icon");
+
+        // pipewire -> channel -> UI + tray
         let (tx, rx) = async_channel::unbounded::<()>();
         spawn_pipewire_listener(tx);
 
@@ -293,6 +333,7 @@ fn run_gui() {
                 let muted = is_muted();
                 refresh(muted, &indicator_evt, &label_evt);
                 switch_evt.set_active(!muted);
+                tray_handle.update(|t: &mut MicTray| t.muted = muted);
             }
         });
 
@@ -316,10 +357,29 @@ fn run_gui() {
             .child(&container)
             .build();
 
-        window.present();
+        // closing hides the window instead of destroying it, otherwise the
+        // last window going away would take the tray indicator down with it
+        window.connect_close_request(|window| {
+            window.set_visible(false);
+            glib::Propagation::Stop
+        });
+
+        let window_evt = window.clone();
+        glib::spawn_future_local(async move {
+            while show_rx.recv().await.is_ok() {
+                window_evt.present();
+            }
+        });
+
+        *existing.borrow_mut() = Some(window.clone());
+        if show_window {
+            window.present();
+        }
     });
 
-    app.run();
+    // our own argv parsing already ran, so hand GTK an empty one: otherwise it
+    // treats `tray` as a file to open, never fires `activate`, and exits
+    app.run_with_args::<&str>(&[]);
 }
 
 fn run_cli(arg: &str) {
@@ -347,8 +407,8 @@ fn run_cli(arg: &str) {
 
 fn main() {
     match std::env::args().nth(1).as_deref() {
-        Some("tray") => run_tray(),
+        Some("tray") => run_app(false),
         Some(arg) => run_cli(arg),
-        None => run_gui(),
+        None => run_app(true),
     }
 }
