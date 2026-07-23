@@ -168,17 +168,15 @@ fn make_icon(active: bool) -> ksni::Icon {
             let i = y * stride + x * 4;
             let px = u32::from_ne_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
             let a = (px >> 24) & 0xff;
-            let (mut r, mut g, mut b) = ((px >> 16) & 0xff, (px >> 8) & 0xff, px & 0xff);
-            if a > 0 {
-                r = (r * 255 / a).min(255);
-                g = (g * 255 / a).min(255);
-                b = (b * 255 / a).min(255);
-            }
+            // undo cairo's premultiplication; a == 0 is fully transparent, so
+            // the color channels carry nothing and stay at zero
+            let straight = |c: u32| (c * 255).checked_div(a).unwrap_or(0).min(255) as u8;
+
             let o = (y * width as usize + x) * 4;
             out[o] = a as u8;
-            out[o + 1] = r as u8;
-            out[o + 2] = g as u8;
-            out[o + 3] = b as u8;
+            out[o + 1] = straight((px >> 16) & 0xff);
+            out[o + 2] = straight((px >> 8) & 0xff);
+            out[o + 3] = straight(px & 0xff);
         }
     }
 
