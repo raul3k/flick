@@ -52,6 +52,41 @@ palette.tritan:
   es: Azul / Amarillo
   pt-BR: Azul / Amarelo
 
+shortcut.label:
+  en: Shortcut
+  es: Atajo
+  pt-BR: Atalho
+
+shortcut.none:
+  en: Not set
+  es: Sin asignar
+  pt-BR: Não definido
+
+shortcut.clear:
+  en: Clear
+  es: Quitar
+  pt-BR: Limpar
+
+shortcut.capture_title:
+  en: Set shortcut
+  es: Definir atajo
+  pt-BR: Definir atalho
+
+shortcut.capture_prompt:
+  en: Press the key combination
+  es: Presiona la combinación de teclas
+  pt-BR: Pressione a combinação de teclas
+
+shortcut.confirm_hint:
+  en: Enter to confirm, Esc to cancel
+  es: Enter para confirmar, Esc para cancelar
+  pt-BR: Enter para confirmar, Esc para cancelar
+
+shortcut.conflict:
+  en: 'Already used by "%{name}" - Enter to use it anyway'
+  es: 'Ya usado por "%{name}" - Enter para usarlo igualmente'
+  pt-BR: 'Já usado por "%{name}" - Enter para usar mesmo assim'
+
 tray.language_auto:
   en: Same as the system
   es: Igual que el sistema

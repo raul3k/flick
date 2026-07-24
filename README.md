@@ -14,6 +14,7 @@ Mute and unmute your microphone on Linux, from a scriptable CLI, a tray indicato
 - A **tray indicator** next to the clock: an "F" tile, green when the mic is live, red and cut by a diagonal when it is muted. The cut means the state is readable without relying on color, which matters because green and red are the pair most affected by color blindness.
 - The window never lies: it reads the real mic state and **updates live** whenever the mic changes from anywhere (GNOME, another app, a keyboard shortcut), using PipeWire events rather than polling.
 - One binary, three modes: a scriptable CLI, the tray indicator, and the GUI.
+- A **global shortcut** to toggle the mic, bound from within the app (on GNOME).
 - Speaks **English, Spanish and Portuguese (Brazil)**, following your system language, with a picker in Preferences if you want a different one.
 - **Color-blind aware:** the indicator colors can be switched to a palette tuned for the color vision condition you have (red-green or blue-yellow), each measured to keep the two states apart under that condition.
 - Small and native (GTK4, talks to PipeWire/WirePlumber).
@@ -49,7 +50,7 @@ cargo build --release
 
 Launch **Flick** from your applications menu, or run `flick` with no arguments. This opens the window **and** puts the indicator in the tray.
 
-The window has a classic menu bar: **File -> Preferences...** opens a settings dialog (language and indicator colors), and **File -> Quit** exits. The tray menu opens the same dialog, so there is a single place for settings and nothing to keep in sync.
+The window has a classic menu bar: **File -> Preferences...** opens a settings dialog (language, colors, and a toggle shortcut), and **File -> Quit** exits. The tray menu opens the same dialog, so there is a single place for settings and nothing to keep in sync.
 
 Closing the window only hides it, so the indicator stays. Use **Quit** to quit for good. Running `flick` again reaches the instance already running instead of starting a second one.
 
@@ -88,6 +89,16 @@ Under **Preferences -> Colors** you can switch the indicator palette. Each optio
 
 The muted icon is also cut by a diagonal, so the state is readable regardless of palette or color vision; the palette is a comfort choice on top of that.
 
+### Shortcut
+
+Under **Preferences -> Shortcut** you can bind a key combination that toggles the mic from anywhere. Click the button, press the combination (it is shown live), and confirm with Enter. Flick warns if the combination is already taken by another desktop shortcut.
+
+How it works, and why it is GNOME-only for now: on Wayland an application cannot grab a global shortcut on its own, so Flick registers a **custom keybinding in the GNOME settings** that runs `flick toggle`. GNOME owns the grab; Flick only registers it (in a dedicated `flick` slot, so it never touches your other shortcuts). On desktops without the GNOME media-keys schema the Shortcut option is hidden. Windows will use `RegisterHotKey` instead; the registration lives behind `src/shortcut.rs` for that.
+
+Note (Wayland): the **Super** key is intentionally not offered. The compositor swallows it before the window can see it, and Super-based bindings tend to collide with GNOME's own. Use `Ctrl`/`Alt`/`Shift` combinations.
+
+The current shortcut is also shown in the tray menu.
+
 ### Settings file
 
 Preferences are stored at `~/.config/flick/config.toml` (`$XDG_CONFIG_HOME` is respected). The file is only written once you change something, and an unreadable one is ignored rather than fatal.
@@ -95,11 +106,8 @@ Preferences are stored at `~/.config/flick/config.toml` (`$XDG_CONFIG_HOME` is r
 ```toml
 language = "auto"    # or "en", "es", "pt-BR"
 palette = "classic"  # or "redgreen", "tritan"
+shortcut = ""        # a GTK accelerator, e.g. "<Control><Alt>m"
 ```
-
-### Bind it to a key (optional)
-
-Flick does not register a global shortcut itself, but since `flick toggle` is just a command you can bind it in GNOME: **Settings -> Keyboard -> Custom Shortcuts**, with the command `flick toggle`. If the window is open, it reflects the change instantly.
 
 ## How it works
 
