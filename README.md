@@ -48,7 +48,9 @@ cargo build --release
 
 Launch **Flick** from your applications menu, or run `flick` with no arguments. This opens the window **and** puts the indicator in the tray.
 
-Closing the window only hides it, so the indicator stays. Use **Sair** in the tray menu to quit for good. Running `flick` again reaches the instance already running instead of starting a second one.
+The window has a classic menu bar: **File -> Quit** and **Preferences -> Language**. It mirrors the tray menu and stays in sync with it, so changing a setting in one updates the other right away.
+
+Closing the window only hides it, so the indicator stays. Use **Quit** (in either menu) to quit for good. Running `flick` again reaches the instance already running instead of starting a second one.
 
 ### Tray indicator
 
