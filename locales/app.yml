@@ -17,6 +17,11 @@ tray.open:
   es: Abrir Flick
   pt-BR: Abrir Flick
 
+menu.file:
+  en: File
+  es: Archivo
+  pt-BR: Arquivo
+
 tray.preferences:
   en: Preferences
   es: Preferencias

@@ -3,6 +3,7 @@ mod i18n;
 
 use config::Config;
 use gtk::cairo;
+use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Label, Orientation, Switch};
@@ -210,18 +211,52 @@ struct MicTray {
     ui: async_channel::Sender<UiMsg>,
 }
 
+/// Switches the active language and remembers the choice. Both the tray menu
+/// and the window menu funnel through here so they stay consistent.
+fn apply_language(setting: &str) {
+    i18n::apply(setting);
+    Config {
+        language: setting.to_string(),
+    }
+    .save();
+}
+
 impl MicTray {
     fn set_language(&mut self, index: usize) {
         self.language = i18n::setting_at(index);
-        i18n::apply(&self.language);
-        Config {
-            language: self.language.clone(),
-        }
-        .save();
+        apply_language(&self.language);
         // the tray relabels itself once this callback returns, but the window
         // is on the other thread and has to be told
         self.ui.try_send(UiMsg::Refresh).ok();
     }
+}
+
+/// Builds the window's menu (the ☰ button). Mirrors the tray menu, minus
+/// "Open Flick" which makes no sense from inside the window. Rebuilt on every
+/// language change so its own labels follow the chosen locale.
+fn build_window_menu() -> gio::Menu {
+    let languages = gio::Menu::new();
+    languages.append(
+        Some(t!("tray.language_auto").as_ref()),
+        Some(&format!("win.language::{}", config::AUTO)),
+    );
+    for (code, name) in i18n::LANGUAGES {
+        languages.append(Some(name), Some(&format!("win.language::{code}")));
+    }
+
+    let preferences = gio::Menu::new();
+    preferences.append_submenu(Some(t!("tray.language").as_ref()), &languages);
+
+    // "File -> Quit" and "Preferences -> Language": every top-level entry of a
+    // menu bar must be a menu, not a bare action, or GTK refuses to render it
+    let file = gio::Menu::new();
+    file.append(Some(t!("tray.quit").as_ref()), Some("win.quit"));
+
+    let menu = gio::Menu::new();
+    menu.append_submenu(Some(t!("menu.file").as_ref()), &file);
+    menu.append_submenu(Some(t!("tray.preferences").as_ref()), &preferences);
+
+    menu
 }
 
 impl ksni::Tray for MicTray {
@@ -336,6 +371,18 @@ fn run_app(show_window: bool, config: Config) {
             .indicator { border-radius: 8px; min-width: 16px; min-height: 16px; }
             .indicator.on { background-color: #2ecc71; }
             .indicator.off { background-color: #e74c3c; }
+
+            /* make the menu bar read as a bar, not loose text, before hover */
+            menubar {
+                background-color: @headerbar_bg_color;
+                border-bottom: 1px solid @borders;
+                padding: 2px 4px;
+            }
+            menubar > item {
+                padding: 4px 12px;
+                border-radius: 5px;
+            }
+            menubar > item:hover { background-color: alpha(currentColor, 0.1); }
             "#,
         );
         gtk::style_context_add_provider_for_display(
@@ -379,6 +426,7 @@ fn run_app(show_window: bool, config: Config) {
             ui: ui_tx,
         };
         let tray_handle = tray.spawn().expect("could not register tray icon");
+        let tray_handle_lang = tray_handle.clone();
 
         // pipewire -> channel -> UI + tray
         let (tx, rx) = async_channel::unbounded::<()>();
@@ -401,19 +449,26 @@ fn run_app(show_window: bool, config: Config) {
         row.append(&label);
         row.append(&switch);
 
-        let container = gtk::Box::new(Orientation::Vertical, 12);
-        container.set_margin_top(16);
-        container.set_margin_bottom(16);
-        container.set_margin_start(16);
-        container.set_margin_end(16);
-        container.append(&row);
+        let content = gtk::Box::new(Orientation::Vertical, 12);
+        content.set_margin_top(16);
+        content.set_margin_bottom(16);
+        content.set_margin_start(16);
+        content.set_margin_end(16);
+        content.append(&row);
+
+        // classic top menu bar (File-menu style), not a GNOME header button
+        let menubar = gtk::PopoverMenuBar::from_model(Some(&build_window_menu()));
+
+        let root = gtk::Box::new(Orientation::Vertical, 0);
+        root.append(&menubar);
+        root.append(&content);
 
         let window = ApplicationWindow::builder()
             .application(app)
             .title("Mic Flick")
             .default_width(300)
-            .default_height(150)
-            .child(&container)
+            .default_height(160)
+            .child(&root)
             .build();
 
         // closing hides the window instead of destroying it, otherwise the
@@ -423,16 +478,49 @@ fn run_app(show_window: bool, config: Config) {
             glib::Propagation::Stop
         });
 
+        // the menu's language radio; changing it here mirrors to the tray
+        let language_action = gio::SimpleAction::new_stateful(
+            "language",
+            Some(glib::VariantTy::STRING),
+            &config.language.to_variant(),
+        );
+        {
+            let indicator = indicator.clone();
+            let label = label.clone();
+            let menubar = menubar.clone();
+            language_action.connect_change_state(move |action, value| {
+                let Some(value) = value else { return };
+                let setting = value.str().unwrap_or(config::AUTO).to_string();
+                action.set_state(value);
+                apply_language(&setting);
+                refresh(is_muted(), &indicator, &label);
+                menubar.set_menu_model(Some(&build_window_menu()));
+                tray_handle_lang.update(move |t: &mut MicTray| t.language = setting.clone());
+            });
+        }
+        window.add_action(&language_action);
+
+        let quit_action = gio::SimpleAction::new("quit", None);
+        quit_action.connect_activate(|_, _| std::process::exit(0));
+        window.add_action(&quit_action);
+
         let window_evt = window.clone();
         let indicator_ui = indicator.clone();
         let label_ui = label.clone();
+        let menubar_ui = menubar.clone();
+        let language_ui = language_action.clone();
         glib::spawn_future_local(async move {
             while let Ok(msg) = ui_rx.recv().await {
                 match msg {
                     UiMsg::Show => window_evt.present(),
-                    // the language changed, so the visible text has to be
-                    // rebuilt from the new locale
-                    UiMsg::Refresh => refresh(is_muted(), &indicator_ui, &label_ui),
+                    // the tray changed the language: mirror the radio, rebuild
+                    // the menu labels, and re-translate the visible text
+                    UiMsg::Refresh => {
+                        let setting = Config::load().language;
+                        language_ui.set_state(&setting.to_variant());
+                        menubar_ui.set_menu_model(Some(&build_window_menu()));
+                        refresh(is_muted(), &indicator_ui, &label_ui);
+                    }
                 }
             }
         });
