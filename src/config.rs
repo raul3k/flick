@@ -10,6 +10,8 @@ pub struct Config {
     /// Either [`AUTO`] to follow the system, or one of the codes in
     /// [`crate::i18n::LANGUAGES`].
     pub language: String,
+    /// One of the codes in [`crate::palette::PALETTES`].
+    pub palette: String,
 }
 
 /// Language setting meaning "whatever the system is set to".
@@ -19,6 +21,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             language: AUTO.into(),
+            palette: crate::palette::DEFAULT.into(),
         }
     }
 }

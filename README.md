@@ -14,7 +14,8 @@ Mute and unmute your microphone on Linux, from a scriptable CLI, a tray indicato
 - A **tray indicator** next to the clock: an "F" tile, green when the mic is live, red and cut by a diagonal when it is muted. The cut means the state is readable without relying on color, which matters because green and red are the pair most affected by color blindness.
 - The window never lies: it reads the real mic state and **updates live** whenever the mic changes from anywhere (GNOME, another app, a keyboard shortcut), using PipeWire events rather than polling.
 - One binary, three modes: a scriptable CLI, the tray indicator, and the GUI.
-- Speaks **English, Spanish and Portuguese (Brazil)**, following your system language, with a picker in the tray if you want a different one.
+- Speaks **English, Spanish and Portuguese (Brazil)**, following your system language, with a picker in Preferences if you want a different one.
+- **Color-blind aware:** the indicator colors can be switched to a palette tuned for the color vision condition you have (red-green or blue-yellow), each measured to keep the two states apart under that condition.
 - Small and native (GTK4, talks to PipeWire/WirePlumber).
 
 ## Requirements
@@ -48,9 +49,9 @@ cargo build --release
 
 Launch **Flick** from your applications menu, or run `flick` with no arguments. This opens the window **and** puts the indicator in the tray.
 
-The window has a classic menu bar: **File -> Quit** and **Preferences -> Language**. It mirrors the tray menu and stays in sync with it, so changing a setting in one updates the other right away.
+The window has a classic menu bar: **File -> Preferences...** opens a settings dialog (language and indicator colors), and **File -> Quit** exits. The tray menu opens the same dialog, so there is a single place for settings and nothing to keep in sync.
 
-Closing the window only hides it, so the indicator stays. Use **Quit** (in either menu) to quit for good. Running `flick` again reaches the instance already running instead of starting a second one.
+Closing the window only hides it, so the indicator stays. Use **Quit** to quit for good. Running `flick` again reaches the instance already running instead of starting a second one.
 
 ### Tray indicator
 
@@ -60,7 +61,7 @@ flick tray
 
 Same thing without opening the window: it goes straight to the tray and waits there. This is what the autostart entry shipped in the `.deb` runs, so after installing, the indicator is back on every login with no extra setup.
 
-The indicator follows the real state in real time. Click it to open the window; right-click for a menu with **Abrir Flick** and **Sair**.
+The indicator follows the real state in real time. Click it to open the window; right-click for a menu to open the window, open Preferences, or quit.
 
 ### Command line
 
@@ -73,16 +74,27 @@ flick toggle   # flip the current state
 
 ### Language
 
-Flick follows your system language, falling back to English when that language is not translated yet. To pick another one, use **Preferences -> Language** in the tray menu. The choice applies immediately and is remembered.
+Flick follows your system language, falling back to English when that language is not translated yet. To pick another one, open **Preferences** (from the window's File menu or the tray) and choose it under **Language**. The choice applies immediately and is remembered.
 
 Translations live in [`locales/app.yml`](locales/app.yml), one entry per string with every language side by side, and are compiled into the binary. Adding a language means adding its code to `LANGUAGES` in `src/i18n.rs` and filling that file in. Pull requests with new languages are welcome.
+
+### Colors
+
+Under **Preferences -> Colors** you can switch the indicator palette. Each option shows its two colors and the color vision condition it targets:
+
+- **Green / Red** - the default.
+- **Blue / Orange** - Protanopia / Deuteranopia (the red-green deficiencies).
+- **Blue / Yellow** - Tritanopia (the blue-yellow deficiency).
+
+The muted icon is also cut by a diagonal, so the state is readable regardless of palette or color vision; the palette is a comfort choice on top of that.
 
 ### Settings file
 
 Preferences are stored at `~/.config/flick/config.toml` (`$XDG_CONFIG_HOME` is respected). The file is only written once you change something, and an unreadable one is ignored rather than fatal.
 
 ```toml
-language = "auto" # or "en", "es", "pt-BR"
+language = "auto"    # or "en", "es", "pt-BR"
+palette = "classic"  # or "redgreen", "tritan"
 ```
 
 ### Bind it to a key (optional)

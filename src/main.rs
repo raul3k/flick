@@ -1,5 +1,6 @@
 mod config;
 mod i18n;
+mod palette;
 
 use config::Config;
 use gtk::cairo;
@@ -8,6 +9,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Label, Orientation, Switch};
 use ksni::blocking::TrayMethods;
+use palette::Palette;
 use pipewire as pw;
 use pw::{node::Node, proxy::Listener, types::ObjectType};
 use rust_i18n::t;
@@ -21,7 +23,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 /// the D-Bus thread and must never touch widgets themselves.
 enum UiMsg {
     Show,
-    Refresh,
+    OpenPreferences,
 }
 
 enum Action {
@@ -107,7 +109,7 @@ fn is_muted() -> bool {
 /// when muted. Deliberately NOT a microphone glyph, because GNOME already
 /// shows one to signal that an app is recording. Returns it as an ARGB32
 /// pixmap in network byte order, the format `ksni::Icon` expects.
-fn make_icon(active: bool) -> ksni::Icon {
+fn make_icon(active: bool, palette: &Palette) -> ksni::Icon {
     // A square icon holding one big dot, so the panel renders it at bar size
     // like any other tray icon (battery, volume) instead of shrinking a wide
     // bitmap. Drawn in a 24x24 logical box at SCALE for a crisp downscale.
@@ -122,11 +124,7 @@ fn make_icon(active: bool) -> ksni::Icon {
         let ctx = cairo::Context::new(&surface).expect("cairo context");
         ctx.scale(SCALE as f64, SCALE as f64); // draw in logical 24x24 coords
 
-        let (r, g, b) = if active {
-            (0.18, 0.80, 0.44) // green
-        } else {
-            (0.91, 0.30, 0.24) // red
-        };
+        let (r, g, b) = palette.color_f(active);
         ctx.set_source_rgb(r, g, b);
 
         // rounded square, the brand tile, filling the whole canvas so the
@@ -206,56 +204,26 @@ struct MicTray {
     muted: bool,
     icon_on: ksni::Icon,
     icon_off: ksni::Icon,
-    /// Current language setting: `auto`, or a code from [`i18n::LANGUAGES`].
-    language: String,
     ui: async_channel::Sender<UiMsg>,
 }
 
-/// Switches the active language and remembers the choice. Both the tray menu
-/// and the window menu funnel through here so they stay consistent.
-fn apply_language(setting: &str) {
-    i18n::apply(setting);
-    Config {
-        language: setting.to_string(),
-    }
-    .save();
-}
-
-impl MicTray {
-    fn set_language(&mut self, index: usize) {
-        self.language = i18n::setting_at(index);
-        apply_language(&self.language);
-        // the tray relabels itself once this callback returns, but the window
-        // is on the other thread and has to be told
-        self.ui.try_send(UiMsg::Refresh).ok();
-    }
-}
-
-/// Builds the window's menu (the ☰ button). Mirrors the tray menu, minus
-/// "Open Flick" which makes no sense from inside the window. Rebuilt on every
-/// language change so its own labels follow the chosen locale.
+/// Builds the window's menu bar. Both entries just open the shared Preferences
+/// dialog or quit, so there is no per-menu state to keep in sync. Rebuilt on
+/// every language change so its own labels follow the chosen locale.
 fn build_window_menu() -> gio::Menu {
-    let languages = gio::Menu::new();
-    languages.append(
-        Some(t!("tray.language_auto").as_ref()),
-        Some(&format!("win.language::{}", config::AUTO)),
-    );
-    for (code, name) in i18n::LANGUAGES {
-        languages.append(Some(name), Some(&format!("win.language::{code}")));
-    }
-
-    let preferences = gio::Menu::new();
-    preferences.append_submenu(Some(t!("tray.language").as_ref()), &languages);
-
-    // "File -> Quit" and "Preferences -> Language": every top-level entry of a
-    // menu bar must be a menu, not a bare action, or GTK refuses to render it
+    // "File -> Preferences... / Quit": every top-level entry of a menu bar must
+    // be a menu, not a bare action, or GTK refuses to render it
     let file = gio::Menu::new();
-    file.append(Some(t!("tray.quit").as_ref()), Some("win.quit"));
+    file.append(
+        Some(&format!("{}…", t!("tray.preferences"))),
+        Some("win.preferences"),
+    );
+    let exit = gio::Menu::new();
+    exit.append(Some(t!("tray.quit").as_ref()), Some("win.quit"));
+    file.append_section(None, &exit);
 
     let menu = gio::Menu::new();
     menu.append_submenu(Some(t!("menu.file").as_ref()), &file);
-    menu.append_submenu(Some(t!("tray.preferences").as_ref()), &preferences);
-
     menu
 }
 
@@ -294,16 +262,7 @@ impl ksni::Tray for MicTray {
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::{RadioGroup, RadioItem, StandardItem, SubMenu};
-
-        let mut languages = vec![RadioItem {
-            label: t!("tray.language_auto").into_owned(),
-            ..Default::default()
-        }];
-        languages.extend(i18n::LANGUAGES.iter().map(|(_, name)| RadioItem {
-            label: (*name).to_string(),
-            ..Default::default()
-        }));
+        use ksni::menu::StandardItem;
 
         vec![
             StandardItem {
@@ -314,25 +273,11 @@ impl ksni::Tray for MicTray {
                 ..Default::default()
             }
             .into(),
-            SubMenu {
-                label: t!("tray.preferences").into_owned(),
-                submenu: vec![
-                    SubMenu {
-                        label: t!("tray.language").into_owned(),
-                        submenu: vec![
-                            RadioGroup {
-                                selected: i18n::menu_index(&self.language),
-                                select: Box::new(|tray: &mut MicTray, index| {
-                                    tray.set_language(index)
-                                }),
-                                options: languages,
-                            }
-                            .into(),
-                        ],
-                        ..Default::default()
-                    }
-                    .into(),
-                ],
+            StandardItem {
+                label: format!("{}…", t!("tray.preferences")),
+                activate: Box::new(|tray: &mut MicTray| {
+                    tray.ui.try_send(UiMsg::OpenPreferences).ok();
+                }),
                 ..Default::default()
             }
             .into(),
@@ -344,6 +289,193 @@ impl ksni::Tray for MicTray {
             }
             .into(),
         ]
+    }
+}
+
+/// CSS for the indicator dot colors of a palette. Lives in its own provider so
+/// switching palette is a one-line reload that leaves the rest untouched.
+fn indicator_css(palette_code: &str) -> String {
+    let p = palette::get(palette_code);
+    format!(
+        ".indicator.on {{ background-color: {}; }} .indicator.off {{ background-color: {}; }}",
+        p.on_hex(),
+        p.off_hex()
+    )
+}
+
+/// A rounded color chip that previews a palette color in the dialog.
+fn swatch(rgb: (f64, f64, f64)) -> gtk::DrawingArea {
+    use std::f64::consts::PI;
+    let area = gtk::DrawingArea::new();
+    area.set_content_width(22);
+    area.set_content_height(18);
+    area.set_valign(gtk::Align::Center);
+    area.set_draw_func(move |_, ctx, w, h| {
+        let (w, h, r) = (w as f64, h as f64, 4.0);
+        ctx.new_sub_path();
+        ctx.arc(w - r, r, r, -0.5 * PI, 0.0);
+        ctx.arc(w - r, h - r, r, 0.0, 0.5 * PI);
+        ctx.arc(r, h - r, r, 0.5 * PI, PI);
+        ctx.arc(r, r, r, PI, 1.5 * PI);
+        ctx.close_path();
+        ctx.set_source_rgb(rgb.0, rgb.1, rgb.2);
+        ctx.fill().ok();
+    });
+    area
+}
+
+/// Shared handles, so the menus, the tray and the Preferences dialog all drive
+/// the same settings without threading a dozen clones through every closure.
+/// The config here is the single source of truth for what is persisted.
+#[derive(Clone)]
+struct Ui {
+    config: Rc<RefCell<Config>>,
+    tray: ksni::blocking::Handle<MicTray>,
+    palette_css: gtk::CssProvider,
+    indicator: gtk::Box,
+    label: Label,
+    menubar: gtk::PopoverMenuBar,
+    window: ApplicationWindow,
+    prefs: Rc<RefCell<Option<gtk::Window>>>,
+}
+
+impl Ui {
+    fn set_language(&self, setting: String) {
+        {
+            let mut config = self.config.borrow_mut();
+            config.language = setting.clone();
+            config.save();
+        }
+        i18n::apply(&setting);
+        refresh(is_muted(), &self.indicator, &self.label);
+        self.menubar.set_menu_model(Some(&build_window_menu()));
+        self.tray.update(|_: &mut MicTray| {}); // relabel tray menu + tooltip
+        // re-translate the dialog's own labels; deferred so we don't rebuild it
+        // from inside its own dropdown callback
+        if let Some(dialog) = self.prefs.borrow().clone() {
+            let ui = self.clone();
+            glib::idle_add_local_once(move || ui.populate_prefs(&dialog));
+        }
+    }
+
+    fn set_palette(&self, code: String) {
+        {
+            let mut config = self.config.borrow_mut();
+            config.palette = code.clone();
+            config.save();
+        }
+        self.palette_css.load_from_data(&indicator_css(&code));
+        let palette = palette::get(&code);
+        let on = make_icon(true, palette);
+        let off = make_icon(false, palette);
+        self.tray.update(move |t: &mut MicTray| {
+            t.icon_on = on;
+            t.icon_off = off;
+        });
+    }
+
+    fn open_prefs(&self) {
+        if self.prefs.borrow().is_none() {
+            let dialog = gtk::Window::builder()
+                .transient_for(&self.window)
+                .default_width(320)
+                .build();
+            // closing hides it, so reopening keeps it cheap and stateful
+            dialog.connect_close_request(|w| {
+                w.set_visible(false);
+                glib::Propagation::Stop
+            });
+            *self.prefs.borrow_mut() = Some(dialog);
+        }
+        let dialog = self.prefs.borrow().clone().expect("just set");
+        self.populate_prefs(&dialog);
+        dialog.present();
+    }
+
+    /// (Re)builds the dialog contents from the current config, so it always
+    /// reflects the active language and the current selections.
+    fn populate_prefs(&self, dialog: &gtk::Window) {
+        dialog.set_title(Some(&t!("tray.preferences")));
+        let config = self.config.borrow().clone();
+
+        let vbox = gtk::Box::new(Orientation::Vertical, 16);
+        vbox.set_margin_top(16);
+        vbox.set_margin_bottom(16);
+        vbox.set_margin_start(16);
+        vbox.set_margin_end(16);
+
+        // language: a dropdown (Same as the system + each translation)
+        let lang_row = gtk::Box::new(Orientation::Horizontal, 12);
+        lang_row.append(&Label::new(Some(&format!("{}:", t!("tray.language")))));
+        let names: Vec<String> = std::iter::once(t!("tray.language_auto").into_owned())
+            .chain(i18n::LANGUAGES.iter().map(|(_, n)| (*n).to_string()))
+            .collect();
+        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let dropdown = gtk::DropDown::from_strings(&name_refs);
+        dropdown.set_selected(i18n::menu_index(&config.language) as u32);
+        dropdown.set_hexpand(true);
+        dropdown.set_halign(gtk::Align::End);
+        {
+            // set_selected above must run before this, or building the dialog
+            // would fire it and overwrite the config with the default
+            let ui = self.clone();
+            dropdown.connect_selected_notify(move |dd| {
+                ui.set_language(i18n::setting_at(dd.selected() as usize));
+            });
+        }
+        lang_row.append(&dropdown);
+        vbox.append(&lang_row);
+
+        // colors: one radio per palette, each showing its two chips + a label
+        // that names the problem it solves ("Blue / Orange (colorblind)")
+        let colors_label = Label::new(Some(&format!("{}:", t!("pref.colors"))));
+        colors_label.set_halign(gtk::Align::Start);
+        vbox.append(&colors_label);
+
+        let mut group: Option<gtk::CheckButton> = None;
+        for p in palette::PALETTES {
+            let radio = gtk::CheckButton::new();
+            if let Some(leader) = &group {
+                radio.set_group(Some(leader));
+            }
+            radio.set_active(config.palette == p.code);
+
+            // the two chips and the label sit next to the radio (CheckButton
+            // child widgets need a newer GTK than we target)
+            let row = gtk::Box::new(Orientation::Horizontal, 8);
+            row.append(&radio);
+            row.append(&swatch(p.color_f(true)));
+            row.append(&swatch(p.color_f(false)));
+
+            // color name, and under it the condition it addresses (if any)
+            let text = gtk::Box::new(Orientation::Vertical, 0);
+            let name = Label::new(Some(&t!(p.name_key)));
+            name.set_halign(gtk::Align::Start);
+            text.append(&name);
+            if !p.condition.is_empty() {
+                let condition = Label::new(Some(p.condition));
+                condition.set_halign(gtk::Align::Start);
+                condition.add_css_class("dim-label");
+                text.append(&condition);
+            }
+            row.append(&text);
+
+            {
+                let ui = self.clone();
+                let code = p.code.to_string();
+                radio.connect_toggled(move |r| {
+                    if r.is_active() {
+                        ui.set_palette(code.clone());
+                    }
+                });
+            }
+            vbox.append(&row);
+            if group.is_none() {
+                group = Some(radio);
+            }
+        }
+
+        dialog.set_child(Some(&vbox));
     }
 }
 
@@ -365,12 +497,13 @@ fn run_app(show_window: bool, config: Config) {
             window.present();
             return;
         }
+        let display = gtk::gdk::Display::default().expect("no display");
+
+        // static styling: indicator shape and the menu bar
         let css = gtk::CssProvider::new();
         css.load_from_data(
             r#"
             .indicator { border-radius: 8px; min-width: 16px; min-height: 16px; }
-            .indicator.on { background-color: #2ecc71; }
-            .indicator.off { background-color: #e74c3c; }
 
             /* make the menu bar read as a bar, not loose text, before hover */
             menubar {
@@ -386,8 +519,18 @@ fn run_app(show_window: bool, config: Config) {
             "#,
         );
         gtk::style_context_add_provider_for_display(
-            &gtk::gdk::Display::default().expect("no display"),
+            &display,
             &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+
+        // palette colors, added after the static sheet so it wins ties; kept
+        // separate so a palette change is one reload of this provider
+        let palette_css = gtk::CssProvider::new();
+        palette_css.load_from_data(&indicator_css(&config.palette));
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &palette_css,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
@@ -418,15 +561,14 @@ fn run_app(show_window: bool, config: Config) {
 
         // tray indicator, in this same process
         let (ui_tx, ui_rx) = async_channel::unbounded::<UiMsg>();
+        let palette = palette::get(&config.palette);
         let tray = MicTray {
             muted,
-            icon_on: make_icon(true),
-            icon_off: make_icon(false),
-            language: config.language.clone(),
+            icon_on: make_icon(true, palette),
+            icon_off: make_icon(false, palette),
             ui: ui_tx,
         };
         let tray_handle = tray.spawn().expect("could not register tray icon");
-        let tray_handle_lang = tray_handle.clone();
 
         // pipewire -> channel -> UI + tray
         let (tx, rx) = async_channel::unbounded::<()>();
@@ -435,12 +577,13 @@ fn run_app(show_window: bool, config: Config) {
         let indicator_evt = indicator.clone();
         let label_evt = label.clone();
         let switch_evt = switch.clone();
+        let tray_evt = tray_handle.clone();
         glib::spawn_future_local(async move {
             while rx.recv().await.is_ok() {
                 let muted = is_muted();
                 refresh(muted, &indicator_evt, &label_evt);
                 switch_evt.set_active(!muted);
-                tray_handle.update(|t: &mut MicTray| t.muted = muted);
+                tray_evt.update(|t: &mut MicTray| t.muted = muted);
             }
         });
 
@@ -478,49 +621,35 @@ fn run_app(show_window: bool, config: Config) {
             glib::Propagation::Stop
         });
 
-        // the menu's language radio; changing it here mirrors to the tray
-        let language_action = gio::SimpleAction::new_stateful(
-            "language",
-            Some(glib::VariantTy::STRING),
-            &config.language.to_variant(),
-        );
+        let ui = Ui {
+            config: Rc::new(RefCell::new(config.clone())),
+            tray: tray_handle,
+            palette_css,
+            indicator,
+            label,
+            menubar,
+            window: window.clone(),
+            prefs: Rc::new(RefCell::new(None)),
+        };
+
+        let preferences_action = gio::SimpleAction::new("preferences", None);
         {
-            let indicator = indicator.clone();
-            let label = label.clone();
-            let menubar = menubar.clone();
-            language_action.connect_change_state(move |action, value| {
-                let Some(value) = value else { return };
-                let setting = value.str().unwrap_or(config::AUTO).to_string();
-                action.set_state(value);
-                apply_language(&setting);
-                refresh(is_muted(), &indicator, &label);
-                menubar.set_menu_model(Some(&build_window_menu()));
-                tray_handle_lang.update(move |t: &mut MicTray| t.language = setting.clone());
-            });
+            let ui = ui.clone();
+            preferences_action.connect_activate(move |_, _| ui.open_prefs());
         }
-        window.add_action(&language_action);
+        window.add_action(&preferences_action);
 
         let quit_action = gio::SimpleAction::new("quit", None);
         quit_action.connect_activate(|_, _| std::process::exit(0));
         window.add_action(&quit_action);
 
-        let window_evt = window.clone();
-        let indicator_ui = indicator.clone();
-        let label_ui = label.clone();
-        let menubar_ui = menubar.clone();
-        let language_ui = language_action.clone();
+        // tray thread -> main loop
+        let ui_msg = ui.clone();
         glib::spawn_future_local(async move {
             while let Ok(msg) = ui_rx.recv().await {
                 match msg {
-                    UiMsg::Show => window_evt.present(),
-                    // the tray changed the language: mirror the radio, rebuild
-                    // the menu labels, and re-translate the visible text
-                    UiMsg::Refresh => {
-                        let setting = Config::load().language;
-                        language_ui.set_state(&setting.to_variant());
-                        menubar_ui.set_menu_model(Some(&build_window_menu()));
-                        refresh(is_muted(), &indicator_ui, &label_ui);
-                    }
+                    UiMsg::Show => ui_msg.window.present(),
+                    UiMsg::OpenPreferences => ui_msg.open_prefs(),
                 }
             }
         });
