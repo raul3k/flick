@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Flick (bandeja)
+Comment=Indicador de microfone na bandeja do sistema
+Exec=/usr/bin/flick tray
+Icon=audio-input-microphone
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+X-GNOME-Autostart-enabled=true

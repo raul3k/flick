@@ -3,7 +3,7 @@
 [![CI](https://github.com/raul3k/flick/actions/workflows/ci.yml/badge.svg)](https://github.com/raul3k/flick/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Mute and unmute your microphone on Linux, from a scriptable CLI or a small GTK window whose status stays in sync with the real state in real time.
+Mute and unmute your microphone on Linux, from a scriptable CLI, a tray indicator, or a small GTK window whose status stays in sync with the real state in real time.
 
 <!-- TODO: add a screenshot at docs/screenshot.png and reference it here -->
 
@@ -11,14 +11,16 @@ Mute and unmute your microphone on Linux, from a scriptable CLI or a small GTK w
 
 - Mute, unmute, or toggle your default microphone.
 - A compact GTK4 window: a green/red indicator, a status label, and a switch.
+- A **tray indicator** next to the clock: an "F" tile, green when the mic is live, red and cut by a diagonal when it is muted. The cut means the state is readable without relying on color, which matters because green and red are the pair most affected by color blindness.
 - The window never lies: it reads the real mic state and **updates live** whenever the mic changes from anywhere (GNOME, another app, a keyboard shortcut), using PipeWire events rather than polling.
-- One binary, two modes: a scriptable CLI and the GUI.
+- One binary, three modes: a scriptable CLI, the tray indicator, and the GUI.
 - Small and native (GTK4, talks to PipeWire/WirePlumber).
 
 ## Requirements
 
 - Linux running PipeWire with WirePlumber (provides `wpctl`).
 - GTK 4.
+- For the tray indicator, a desktop that renders `StatusNotifierItem` icons. KDE, Cinnamon and XFCE do it natively. On GNOME you need the **AppIndicator and KStatusNotifierItem Support** extension enabled (it ships with Ubuntu); on Wayland, log out and back in after enabling it.
 
 ## Installation
 
@@ -43,7 +45,19 @@ cargo build --release
 
 ### Window
 
-Launch **Flick** from your applications menu, or run `flick` with no arguments.
+Launch **Flick** from your applications menu, or run `flick` with no arguments. This opens the window **and** puts the indicator in the tray.
+
+Closing the window only hides it, so the indicator stays. Use **Sair** in the tray menu to quit for good. Running `flick` again reaches the instance already running instead of starting a second one.
+
+### Tray indicator
+
+```bash
+flick tray
+```
+
+Same thing without opening the window: it goes straight to the tray and waits there. This is what the autostart entry shipped in the `.deb` runs, so after installing, the indicator is back on every login with no extra setup.
+
+The indicator follows the real state in real time. Click it to open the window; right-click for a menu with **Abrir Flick** and **Sair**.
 
 ### Command line
 
@@ -62,6 +76,7 @@ Flick does not register a global shortcut itself, but since `flick toggle` is ju
 
 - The mic state is read from `wpctl` (the mute of `@DEFAULT_AUDIO_SOURCE@`).
 - A background thread connects to PipeWire and listens for changes on audio source nodes. When the mic changes from anywhere, the window re-reads the real state and refreshes. UI updates are marshalled back to the main thread through an async channel, so the PipeWire thread never touches widgets.
+- The tray indicator speaks `StatusNotifierItem` over D-Bus (no GTK status icon). Its tile is drawn with cairo and handed over as an ARGB32 pixmap, so the panel can scale it to whatever size it wants. Window and indicator live in the same process and share one PipeWire listener; the tray runs on its own D-Bus thread and asks the main loop to show the window through a channel, so it never touches widgets directly.
 
 ## Building a `.deb`
 
