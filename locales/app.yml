@@ -32,6 +32,26 @@ tray.language:
   es: Idioma
   pt-BR: Idioma
 
+pref.colors:
+  en: Colors
+  es: Colores
+  pt-BR: Cores
+
+palette.classic:
+  en: Green / Red
+  es: Verde / Rojo
+  pt-BR: Verde / Vermelho
+
+palette.redgreen:
+  en: Blue / Orange
+  es: Azul / Naranja
+  pt-BR: Azul / Laranja
+
+palette.tritan:
+  en: Blue / Yellow
+  es: Azul / Amarillo
+  pt-BR: Azul / Amarelo
+
 tray.language_auto:
   en: Same as the system
   es: Igual que el sistema
