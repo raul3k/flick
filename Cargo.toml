@@ -1,6 +1,6 @@
 [package]
 name = "flick"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 description = "Desktop microphone control: mute and unmute from a CLI, a tray indicator, or a live window"
 license = "MIT"

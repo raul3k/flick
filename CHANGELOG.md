@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/raul3k/flick/compare/v0.4.0...v0.5.0) (2026-07-24)
+
+
+### Features
+
+* add a preferences dialog with color-blind-aware indicator palettes ([5d79046](https://github.com/raul3k/flick/commit/5d790466096d410aef66d79f223ea37bcf2a8df6))
+* add a preferences dialog with color-blind-aware indicator palettes ([315792e](https://github.com/raul3k/flick/commit/315792ed27757677b5f7b9f9893378d833d73288))
+
 ## [0.4.0](https://github.com/raul3k/flick/compare/v0.3.0...v0.4.0) (2026-07-24)
 
 
