@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/raul3k/flick/compare/v0.3.0...v0.4.0) (2026-07-24)
+
+
+### Features
+
+* add a window menu bar mirroring the tray preferences ([41bb144](https://github.com/raul3k/flick/commit/41bb1445ab6aefbf6b5508275453375ec72936b8))
+
 ## [0.3.0](https://github.com/raul3k/flick/compare/v0.2.0...v0.3.0) (2026-07-24)
 
 
