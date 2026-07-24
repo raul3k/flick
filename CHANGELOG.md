@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.0.0](https://github.com/raul3k/flick/compare/flick-v0.6.0...flick-v1.0.0) (2026-07-24)
+
+
+### Features
+
+* add a global toggle shortcut set from the preferences dialog ([5593ed3](https://github.com/raul3k/flick/commit/5593ed3d22a065a3ab9e505410bc7488729af3b1))
+* add a global toggle shortcut, set from the preferences dialog ([7289db5](https://github.com/raul3k/flick/commit/7289db55479ad65d727b77981ab045acd0e035e6))
+* add a preferences dialog with color-blind-aware indicator palettes ([5d79046](https://github.com/raul3k/flick/commit/5d790466096d410aef66d79f223ea37bcf2a8df6))
+* add a preferences dialog with color-blind-aware indicator palettes ([315792e](https://github.com/raul3k/flick/commit/315792ed27757677b5f7b9f9893378d833d73288))
+* add a window menu bar mirroring the tray preferences ([41bb144](https://github.com/raul3k/flick/commit/41bb1445ab6aefbf6b5508275453375ec72936b8))
+* add a window menu bar mirroring the tray preferences ([06a17be](https://github.com/raul3k/flick/commit/06a17beac5417f52e66b97b83b76050c6d8c009b))
+* add tray indicator with live mic state ([74840a4](https://github.com/raul3k/flick/commit/74840a40a10bf87bf0bbbc26751871a697798ffc))
+* add tray indicator with live mic state ([d98bf85](https://github.com/raul3k/flick/commit/d98bf85fc5827ee8b2c09a93d050011ba010f112))
+* app de controle de microfone (CLI, janela GTK e status ao vivo via PipeWire) ([e5ca0b9](https://github.com/raul3k/flick/commit/e5ca0b9aab7826920cb36dd831202c44d0f86425))
+* mic mute control (CLI, GTK window, live PipeWire status) ([4fa2f36](https://github.com/raul3k/flick/commit/4fa2f3677c12a46dfe0770801aa8dae5adbfc06d))
+* show tray indicator in window mode and mark muted state without color ([18b57e4](https://github.com/raul3k/flick/commit/18b57e49805afcc19a31dc286e7952805f1d7e41))
+* translate the interface into english, spanish and portuguese ([2af3f48](https://github.com/raul3k/flick/commit/2af3f48ff500df90e4f8b27e8ce284f00493eaec))
+* translate the interface into english, spanish and portuguese ([41f5f0d](https://github.com/raul3k/flick/commit/41f5f0d5258bb53ae137b80e82c95a3a3f4203d8))
+
+
+### Bug Fixes
+
+* unpremultiply icon pixels with checked division ([388d470](https://github.com/raul3k/flick/commit/388d47000bbae5d33d957ff67d5d9769a05ca387))
+
 ## [0.6.0](https://github.com/raul3k/flick/compare/v0.5.0...v0.6.0) (2026-07-24)
 
 
