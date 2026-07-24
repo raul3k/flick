@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/raul3k/flick/compare/v0.5.0...v0.6.0) (2026-07-24)
+
+
+### Features
+
+* add a global toggle shortcut set from the preferences dialog ([5593ed3](https://github.com/raul3k/flick/commit/5593ed3d22a065a3ab9e505410bc7488729af3b1))
+* add a global toggle shortcut, set from the preferences dialog ([7289db5](https://github.com/raul3k/flick/commit/7289db55479ad65d727b77981ab045acd0e035e6))
+
 ## [0.5.0](https://github.com/raul3k/flick/compare/v0.4.0...v0.5.0) (2026-07-24)
 
 
