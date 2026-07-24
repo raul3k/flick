@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/raul3k/flick/compare/v0.2.0...v0.3.0) (2026-07-24)
+
+
+### Features
+
+* translate the interface into english, spanish and portuguese ([2af3f48](https://github.com/raul3k/flick/commit/2af3f48ff500df90e4f8b27e8ce284f00493eaec))
+* translate the interface into english, spanish and portuguese ([41f5f0d](https://github.com/raul3k/flick/commit/41f5f0d5258bb53ae137b80e82c95a3a3f4203d8))
+
 ## [0.2.0](https://github.com/raul3k/flick/compare/v0.1.0...v0.2.0) (2026-07-24)
 
 
