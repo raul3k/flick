@@ -1,6 +1,7 @@
 mod config;
 mod i18n;
 mod palette;
+mod shortcut;
 
 use config::Config;
 use gtk::cairo;
@@ -205,6 +206,11 @@ struct MicTray {
     icon_on: ksni::Icon,
     icon_off: ksni::Icon,
     ui: async_channel::Sender<UiMsg>,
+    /// Whether the desktop supports registering a shortcut at all.
+    shortcut_supported: bool,
+    /// Human label of the current shortcut (empty = none), formatted on the GTK
+    /// thread and handed over, since the tray runs off it.
+    shortcut_label: String,
 }
 
 /// Builds the window's menu bar. Both entries just open the shared Preferences
@@ -264,7 +270,7 @@ impl ksni::Tray for MicTray {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::StandardItem;
 
-        vec![
+        let mut items: Vec<ksni::MenuItem<Self>> = vec![
             StandardItem {
                 label: t!("tray.open").into_owned(),
                 activate: Box::new(|tray: &mut MicTray| {
@@ -281,14 +287,35 @@ impl ksni::Tray for MicTray {
                 ..Default::default()
             }
             .into(),
-            ksni::MenuItem::Separator,
+        ];
+
+        // status line: whether a toggle shortcut is set, and which
+        if self.shortcut_supported {
+            let value = if self.shortcut_label.is_empty() {
+                t!("shortcut.none").into_owned()
+            } else {
+                self.shortcut_label.clone()
+            };
+            items.push(
+                StandardItem {
+                    label: format!("{}: {}", t!("shortcut.label"), value),
+                    enabled: false, // informational, not clickable
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+
+        items.push(ksni::MenuItem::Separator);
+        items.push(
             StandardItem {
                 label: t!("tray.quit").into_owned(),
                 activate: Box::new(|_| std::process::exit(0)),
                 ..Default::default()
             }
             .into(),
-        ]
+        );
+        items
     }
 }
 
@@ -324,6 +351,35 @@ fn swatch(rgb: (f64, f64, f64)) -> gtk::DrawingArea {
     area
 }
 
+/// A human label for a stored accelerator (e.g. `<Control><Alt>m` -> "Ctrl+Alt+M").
+/// Empty string for an empty accelerator. Must run on the GTK thread.
+fn accel_label(accel: &str) -> String {
+    if accel.is_empty() {
+        return String::new();
+    }
+    match gtk::accelerator_parse(accel) {
+        Some((key, mods)) => gtk::accelerator_get_label(key, mods).to_string(),
+        None => accel.to_string(),
+    }
+}
+
+/// A "Ctrl+Alt" style label for the modifiers currently held, to echo the combo
+/// live while it is being pressed. Super is excluded on purpose (see capture).
+fn modifier_label(mods: gtk::gdk::ModifierType) -> String {
+    use gtk::gdk::ModifierType as M;
+    let mut parts = Vec::new();
+    if mods.contains(M::CONTROL_MASK) {
+        parts.push("Ctrl");
+    }
+    if mods.contains(M::ALT_MASK) {
+        parts.push("Alt");
+    }
+    if mods.contains(M::SHIFT_MASK) {
+        parts.push("Shift");
+    }
+    parts.join("+")
+}
+
 /// Shared handles, so the menus, the tray and the Preferences dialog all drive
 /// the same settings without threading a dozen clones through every closure.
 /// The config here is the single source of truth for what is persisted.
@@ -350,12 +406,115 @@ impl Ui {
         refresh(is_muted(), &self.indicator, &self.label);
         self.menubar.set_menu_model(Some(&build_window_menu()));
         self.tray.update(|_: &mut MicTray| {}); // relabel tray menu + tooltip
-        // re-translate the dialog's own labels; deferred so we don't rebuild it
-        // from inside its own dropdown callback
+        self.refresh_prefs();
+    }
+
+    fn set_shortcut(&self, accel: String) {
+        {
+            let mut config = self.config.borrow_mut();
+            config.shortcut = accel.clone();
+            config.save();
+        }
+        shortcut::apply(&accel);
+        let label = accel_label(&accel);
+        self.tray
+            .update(move |t: &mut MicTray| t.shortcut_label = label);
+        self.refresh_prefs();
+    }
+
+    /// Rebuilds the dialog contents if it is open, deferred so we never rebuild
+    /// it from inside one of its own widget callbacks.
+    fn refresh_prefs(&self) {
         if let Some(dialog) = self.prefs.borrow().clone() {
             let ui = self.clone();
             glib::idle_add_local_once(move || ui.populate_prefs(&dialog));
         }
+    }
+
+    /// Opens a small window that captures the next key combination and stores
+    /// it as the toggle shortcut.
+    fn open_capture(&self) {
+        let win = gtk::Window::builder()
+            .modal(true)
+            .default_width(340)
+            .build();
+        win.set_title(Some(&t!("shortcut.capture_title")));
+        if let Some(parent) = self.prefs.borrow().as_ref() {
+            win.set_transient_for(Some(parent));
+        }
+
+        let content = gtk::Box::new(Orientation::Vertical, 8);
+        content.set_margin_top(24);
+        content.set_margin_bottom(24);
+        content.set_margin_start(24);
+        content.set_margin_end(24);
+
+        // echoes the combo as it is pressed; committed only on Enter, so the
+        // user sees (and can retry) it before it is stored
+        let display = Label::new(Some(&t!("shortcut.capture_prompt")));
+        let hint = Label::new(None);
+        hint.add_css_class("dim-label");
+        content.append(&display);
+        content.append(&hint);
+        win.set_child(Some(&content));
+
+        // Super is intentionally not offered: Wayland doesn't deliver it to the
+        // window, and Super bindings collide with GNOME's own.
+        let pending: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+
+        // live: reflect the modifiers held so far, until a full combo is pending
+        {
+            let display = display.clone();
+            let pending = pending.clone();
+            keys.connect_modifiers(move |_, state| {
+                if pending.borrow().is_none() {
+                    let held = modifier_label(state & gtk::accelerator_get_default_mod_mask());
+                    let text = if held.is_empty() {
+                        t!("shortcut.capture_prompt").into_owned()
+                    } else {
+                        format!("{held} + …")
+                    };
+                    display.set_text(&text);
+                }
+                glib::Propagation::Proceed
+            });
+        }
+
+        let ui = self.clone();
+        let win_evt = win.clone();
+        keys.connect_key_pressed(move |_, keyval, _code, state| {
+            use gtk::gdk::Key;
+            if keyval == Key::Escape {
+                win_evt.close();
+                return glib::Propagation::Stop;
+            }
+            if keyval == Key::Return || keyval == Key::KP_Enter {
+                if let Some(accel) = pending.borrow().clone() {
+                    ui.set_shortcut(accel);
+                    win_evt.close();
+                }
+                return glib::Propagation::Stop;
+            }
+            // require a modifier so a bare key can't become a global shortcut;
+            // GTK also rejects lone modifiers and other non-accelerator keys
+            let mods = state & gtk::accelerator_get_default_mod_mask();
+            if !mods.is_empty() && gtk::accelerator_valid(keyval, mods) {
+                let accel = gtk::accelerator_name(keyval, mods).to_string();
+                display.set_text(&gtk::accelerator_get_label(keyval, mods));
+                let message = match shortcut::conflict(&accel) {
+                    Some(name) => t!("shortcut.conflict", name = name).into_owned(),
+                    None => t!("shortcut.confirm_hint").into_owned(),
+                };
+                hint.set_text(&message);
+                *pending.borrow_mut() = Some(accel);
+            }
+            glib::Propagation::Stop
+        });
+        win.add_controller(keys);
+        win.present();
     }
 
     fn set_palette(&self, code: String) {
@@ -475,6 +634,37 @@ impl Ui {
             }
         }
 
+        // shortcut: only where the desktop can actually register one
+        if shortcut::available() {
+            let row = gtk::Box::new(Orientation::Horizontal, 8);
+            row.append(&Label::new(Some(&format!("{}:", t!("shortcut.label")))));
+
+            let current_label = if config.shortcut.is_empty() {
+                t!("shortcut.none").into_owned()
+            } else {
+                accel_label(&config.shortcut)
+            };
+            let set_button = gtk::Button::with_label(&current_label);
+            set_button.set_hexpand(true);
+            set_button.set_halign(gtk::Align::End);
+            {
+                let ui = self.clone();
+                set_button.connect_clicked(move |_| ui.open_capture());
+            }
+            row.append(&set_button);
+
+            if !config.shortcut.is_empty() {
+                let clear = gtk::Button::from_icon_name("edit-clear-symbolic");
+                clear.set_tooltip_text(Some(&t!("shortcut.clear")));
+                {
+                    let ui = self.clone();
+                    clear.connect_clicked(move |_| ui.set_shortcut(String::new()));
+                }
+                row.append(&clear);
+            }
+            vbox.append(&row);
+        }
+
         dialog.set_child(Some(&vbox));
     }
 }
@@ -497,6 +687,9 @@ fn run_app(show_window: bool, config: Config) {
             window.present();
             return;
         }
+        // keep the desktop's registered shortcut in step with our config
+        shortcut::apply(&config.shortcut);
+
         let display = gtk::gdk::Display::default().expect("no display");
 
         // static styling: indicator shape and the menu bar
@@ -567,6 +760,8 @@ fn run_app(show_window: bool, config: Config) {
             icon_on: make_icon(true, palette),
             icon_off: make_icon(false, palette),
             ui: ui_tx,
+            shortcut_supported: shortcut::available(),
+            shortcut_label: accel_label(&config.shortcut),
         };
         let tray_handle = tray.spawn().expect("could not register tray icon");
 
