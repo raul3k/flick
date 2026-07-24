@@ -1,6 +1,6 @@
 [package]
 name = "flick"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Controle de microfone para o desktop (mute/unmute com atalho e janela ao vivo)"
 license = "MIT"
