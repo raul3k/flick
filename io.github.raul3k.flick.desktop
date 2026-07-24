@@ -1,7 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=Flick
-Comment=Controle de microfone
+Comment=Microphone control
+Comment[pt_BR]=Controle de microfone
+Comment[es]=Control de micrófono
 Exec=/usr/bin/flick
 Icon=audio-input-microphone
 Terminal=false
